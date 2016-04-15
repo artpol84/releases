@@ -73,7 +73,7 @@ int pmix_hash_store(pmix_hash_table_t *table,
                         "HASH:STORE rank %d key %s",
                         rank, kin->key);
 
-    if (PMIX_RANK_WILDCARD == rank) {
+    if (PMIX_RANK_UNDEF == rank) {
         id = UINT64_MAX;
     } else {
         id = (uint64_t)rank;
@@ -112,12 +112,7 @@ pmix_status_t pmix_hash_fetch(pmix_hash_table_t *table, int rank,
                         "HASH:FETCH rank %d key %s",
                         rank, (NULL == key) ? "NULL" : key);
 
-    /* NULL keys are not supported */
-    if (NULL == key) {
-        return PMIX_ERR_BAD_PARAM;
-    }
-
-    if (PMIX_RANK_WILDCARD == rank) {
+    if (PMIX_RANK_UNDEF == rank) {
         id = UINT64_MAX;
     } else {
         id = (uint64_t)rank;
@@ -131,17 +126,23 @@ pmix_status_t pmix_hash_fetch(pmix_hash_table_t *table, int rank,
         return PMIX_ERR_PROC_ENTRY_NOT_FOUND;
     }
 
-    /* find the value from within this proc_data object */
-    if (NULL == (hv = lookup_keyval(&proc_data->data, key))) {
-        pmix_output_verbose(10, pmix_globals.debug_output,
-                            "HASH:FETCH data for key %s not found", key);
-        return PMIX_ERR_NOT_FOUND;
-    }
-
-    /* create the copy */
-    if (PMIX_SUCCESS != (rc = pmix_bfrop.copy((void**)kvs, hv->value, PMIX_VALUE))) {
-        PMIX_ERROR_LOG(rc);
-        return rc;
+    /* if the key is NULL, then the user wants -all- data
+     * put by the specified rank */
+    if (NULL == key) {
+        /* we will return the data as an array of pmix_info_t
+         * in the kvs pmix_value_t */
+    } else {
+        /* find the value from within this proc_data object */
+        if (NULL == (hv = lookup_keyval(&proc_data->data, key))) {
+            pmix_output_verbose(10, pmix_globals.debug_output,
+                                "HASH:FETCH data for key %s not found", key);
+            return PMIX_ERR_NOT_FOUND;
+        }
+        /* create the copy */
+        if (PMIX_SUCCESS != (rc = pmix_bfrop.copy((void**)kvs, hv->value, PMIX_VALUE))) {
+            PMIX_ERROR_LOG(rc);
+            return rc;
+        }
     }
 
     return PMIX_SUCCESS;
@@ -157,7 +158,7 @@ int pmix_hash_remove_data(pmix_hash_table_t *table,
 
     /* if the rank is wildcard, we want to apply this to
      * all rank entries */
-    if (PMIX_RANK_WILDCARD == rank) {
+    if (PMIX_RANK_UNDEF == rank) {
         id = UINT64_MAX;
         if (PMIX_SUCCESS == pmix_hash_table_get_first_key_uint64(table, &id,
                                                                  (void**)&proc_data,

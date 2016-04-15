@@ -64,8 +64,19 @@ BEGIN_C_DECLS
 #define PMIX_MAX_NSLEN     255
 #define PMIX_MAX_KEYLEN    511
 
-/* define a *wildcard* value for requests involving rank */
-#define PMIX_RANK_WILDCARD -1
+/* define a value for requests for job-level data
+ * where the info itself isn't associated with any
+ * specific rank, or when a request involves
+ * a rank that isn't known - e.g., when someone requests
+ * info thru one of the legacy interfaces where the rank
+ * is typically encoded into the key itself since there is
+ * no rank parameter in the API itself */
+#define PMIX_RANK_UNDEF     INT32_MAX
+/* define a value to indicate that the user wants the
+ * data for the given key from every rank that posted
+ * that key */
+#define PMIX_RANK_WILDCARD  INT32_MAX-1
+
 
 /* define a set of "standard" PMIx attributes that can
  * be queried. Implementations (and users) are free to extend as
