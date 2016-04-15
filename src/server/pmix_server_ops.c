@@ -1,6 +1,6 @@
 /* -*- Mode: C; c-basic-offset:4 ; indent-tabs-mode:nil -*- */
 /*
- * Copyright (c) 2014-2015 Intel, Inc.  All rights reserved.
+ * Copyright (c) 2014-2016 Intel, Inc.  All rights reserved.
  * Copyright (c) 2014-2015 Research Organization for Information Science
  *                         and Technology (RIST). All rights reserved.
  * Copyright (c) 2014-2015 Artem Y. Polyakov <artpol84@gmail.com>.
@@ -132,7 +132,7 @@ pmix_status_t pmix_server_commit(pmix_peer_t *peer, pmix_buffer_t *buf)
     pmix_nspace_t *nptr;
     pmix_rank_info_t *info;
     pmix_dmdx_remote_t *dcd, *dcdnext;
-    pmix_buffer_t pbkt;
+    pmix_buffer_t *pbkt;
     pmix_value_t *val;
     char *data;
     size_t sz;
@@ -162,17 +162,39 @@ pmix_status_t pmix_server_commit(pmix_peer_t *peer, pmix_buffer_t *buf)
             PMIX_ERROR_LOG(rc);
             return rc;
         }
-        kp = PMIX_NEW(pmix_kval_t);
-        kp->key = strdup("modex");
-        PMIX_VALUE_CREATE(kp->value, 1);
-        kp->value->type = PMIX_BYTE_OBJECT;
-        PMIX_UNLOAD_BUFFER(b2, kp->value->data.bo.bytes, kp->value->data.bo.size);
-        PMIX_RELEASE(b2);
-        /* store it in the appropriate hash */
-        if (PMIX_SUCCESS != (rc = pmix_hash_store(ht, info->rank, kp))) {
-            PMIX_ERROR_LOG(rc);
+        /* see if we already have info for this proc */
+        if (PMIX_SUCCESS == pmix_hash_fetch(ht, info->rank, "modex", &val) && NULL != val) {
+            /* create the new data storage */
+            kp = PMIX_NEW(pmix_kval_t);
+            kp->key = strdup("modex");
+            PMIX_VALUE_CREATE(kp->value, 1);
+            kp->value->type = PMIX_BYTE_OBJECT;
+            /* get space for the new new data blob */
+            kp->value->data.bo.bytes = (char*)malloc(b2->bytes_used + val->data.bo.size);
+            memcpy(kp->value->data.bo.bytes, val->data.bo.bytes, val->data.bo.size);
+            memcpy(kp->value->data.bo.bytes+val->data.bo.size, b2->base_ptr, b2->bytes_used);
+            kp->value->data.bo.size = val->data.bo.size + b2->bytes_used;
+            /* release the storage */
+            PMIX_VALUE_FREE(val, 1);
+            /* store it in the appropriate hash */
+            if (PMIX_SUCCESS != (rc = pmix_hash_store(ht, info->rank, kp))) {
+                PMIX_ERROR_LOG(rc);
+            }
+            PMIX_RELEASE(kp);  // maintain acctg
+        } else {
+            /* create a new kval to hold this data */
+            kp = PMIX_NEW(pmix_kval_t);
+            kp->key = strdup("modex");
+            PMIX_VALUE_CREATE(kp->value, 1);
+            kp->value->type = PMIX_BYTE_OBJECT;
+            PMIX_UNLOAD_BUFFER(b2, kp->value->data.bo.bytes, kp->value->data.bo.size);
+            PMIX_RELEASE(b2);
+            /* store it in the appropriate hash */
+            if (PMIX_SUCCESS != (rc = pmix_hash_store(ht, info->rank, kp))) {
+                PMIX_ERROR_LOG(rc);
+            }
+            PMIX_RELEASE(kp);  // maintain acctg
         }
-        PMIX_RELEASE(kp);  // maintain acctg
         cnt = 1;
     }
     if (PMIX_ERR_UNPACK_READ_PAST_END_OF_BUFFER != rc) {
@@ -191,16 +213,16 @@ pmix_status_t pmix_server_commit(pmix_peer_t *peer, pmix_buffer_t *buf)
         if (dcd->cd->proc.rank == info->rank) {
            /* we can now fulfill this request - collect the
              * remote/global data from this proc */
-            PMIX_CONSTRUCT(&pbkt, pmix_buffer_t);
+            pbkt = PMIX_NEW(pmix_buffer_t);
             /* get any remote contribution - note that there
              * may not be a contribution */
             if (PMIX_SUCCESS == pmix_hash_fetch(&nptr->server->myremote, info->rank, "modex", &val) &&
                 NULL != val) {
-                PMIX_LOAD_BUFFER(&pbkt, val->data.bo.bytes, val->data.bo.size);
+                PMIX_LOAD_BUFFER(pbkt, val->data.bo.bytes, val->data.bo.size);
                 PMIX_VALUE_RELEASE(val);
             }
-            PMIX_UNLOAD_BUFFER(&pbkt, data, sz);
-            PMIX_DESTRUCT(&pbkt);
+            PMIX_UNLOAD_BUFFER(pbkt, data, sz);
+            PMIX_RELEASE(pbkt);
             /* execute the callback */
             dcd->cd->cbfunc(PMIX_SUCCESS, data, sz, dcd->cd->cbdata);
             if (NULL != data) {
@@ -211,7 +233,7 @@ pmix_status_t pmix_server_commit(pmix_peer_t *peer, pmix_buffer_t *buf)
             PMIX_RELEASE(dcd);
         }
     }
-    /* see if anyone local is waiting on this data - could be more than one */
+    /* see if anyone local is waiting on this data- could be more than one */
     return pmix_pending_resolve(nptr, info->rank, PMIX_SUCCESS, NULL);
 }
 
