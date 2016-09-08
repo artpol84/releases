@@ -217,10 +217,14 @@ static pmix_status_t initialize_server_base(pmix_server_module_t *module)
         }
     }
 
-    /* now set the address - we use the pid here to reduce collisions */
+    /* now set the address
+     * - use userid to avoid situation where user with other UID but same PID 
+     *   has created the usock and terminate abnormally and we have no way to
+     *   remove the file
+     * - use the pid to reduce collisions */
     memset(&myaddress, 0, sizeof(struct sockaddr_un));
     myaddress.sun_family = AF_UNIX;
-    if (0 > asprintf(&pmix_pid, "pmix-%d", pid)) {
+    if (0 > asprintf(&pmix_pid, "pmix-%d.%d", getuid(), pid)) {
         return PMIX_ERR_NOMEM;
     }
     // If the above set temporary directory name plus the pmix-PID string

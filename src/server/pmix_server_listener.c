@@ -69,6 +69,38 @@ static void connection_handler(int incoming_sd, short flags, void* cbdata);
 static char *myversion = NULL;
 static pthread_t engine;
 
+static int _try_cleanup_usock(char *fname)
+{
+    struct stat sbuf;
+    
+    /* if socket file not exist we don't have the workaround */
+    if( stat(fname, &sbuf) ){
+        return PMIX_ERROR;
+    }
+
+    /* If usock filename corresponds to something not a socket - no workaround */
+#ifdef S_ISSOCK
+    /* if this is POSIX version > POSIX.1-1996 we can check for unix socket */
+    if( !S_ISSOCK(sbuf.st_mode) ){
+        return PMIX_ERROR;
+    }
+#else
+    /* otherwise - use negation */
+    if( S_ISREG(sbuf.st_mode) || S_ISDIR(sbuf.st_mode) ||
+        S_ISCHR(sbuf.st_mode) || S_ISBLK(sbuf.st_mode) ||
+        S_ISFIFO(sbuf.st_mode) ){
+        return PMIX_ERROR;
+    }
+#endif
+    if ( access(fname, F_OK)) {
+        return PMIX_ERROR;
+    }
+    /* remove the stale usock */
+    unlink(fname);
+    return PMIX_SUCCESS;
+}
+
+
 /*
  * start listening on our rendezvous file
  */
@@ -89,8 +121,16 @@ pmix_status_t pmix_start_listening(struct sockaddr_un *address,
 
     addrlen = sizeof(struct sockaddr_un);
     if (bind(pmix_server_globals.listen_socket, (struct sockaddr*)address, addrlen) < 0) {
-        printf("%s:%d bind() failed\n", __FILE__, __LINE__);
-        return PMIX_ERROR;
+        int errno_bkp = errno; /* backup errno */
+        if( PMIX_SUCCESS !=_try_cleanup_usock(address->sun_path) ) {
+            printf("%s:%d bind() failed, errno = %d\n", __FILE__, __LINE__, errno_bkp);
+            return PMIX_ERROR;
+        }
+        /* try once again */
+        if (bind(pmix_server_globals.listen_socket, (struct sockaddr*)address, addrlen) < 0) {
+            printf("%s:%d bind() failed, errno = %d\n", __FILE__, __LINE__, errno);
+            return PMIX_ERROR;
+        }
     }
     /* chown as required */
     if (0 != chown(address->sun_path, sockuid, sockgid)) {
